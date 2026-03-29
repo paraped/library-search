@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Library Search</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #f5f2ec;
+      --surface: #fffdf8;
+      --border: #d8d0c0;
+      --accent: #5c4a2a;
+      --accent-light: #8c6d3f;
+      --text: #2c2416;
+      --text-muted: #7a6a50;
+      --tag-bg: #ede8de;
+      --tag-border: #c4b89a;
+      --highlight: #fff3cd;
+      --radius: 6px;
+    }
+
+    body {
+      font-family: Georgia, 'Times New Roman', serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: var(--accent);
+      color: #fff;
+      padding: 1.25rem 2rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    header h1 {
+      font-size: 1.4rem;
+      font-weight: normal;
+      letter-spacing: 0.03em;
+    }
+
+    header span {
+      font-size: 1.6rem;
+    }
+
+    .container {
+      max-width: 860px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+      flex: 1;
+    }
+
+    /* Search bar */
+    .search-bar {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .search-bar input {
+      flex: 1;
+      padding: 0.65rem 1rem;
+      font-size: 1rem;
+      font-family: inherit;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .search-bar input:focus { border-color: var(--accent-light); }
+
+    .search-bar button {
+      padding: 0.65rem 1.4rem;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 1rem;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .search-bar button:hover { background: var(--accent-light); }
+
+    /* Filters row */
+    .filters {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+    }
+
+    .filters label {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .filters select, .filters input[type="number"] {
+      padding: 0.3rem 0.6rem;
+      font-size: 0.9rem;
+      font-family: inherit;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+      outline: none;
+    }
+
+    .filters select:focus, .filters input[type="number"]:focus {
+      border-color: var(--accent-light);
+    }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 0;
+      border-bottom: 2px solid var(--border);
+      margin-bottom: 1.5rem;
+    }
+
+    .tab {
+      padding: 0.5rem 1.2rem;
+      font-size: 0.95rem;
+      font-family: inherit;
+      border: none;
+      background: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      transition: color 0.15s;
+    }
+
+    .tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+      font-weight: bold;
+    }
+
+    .tab:hover:not(.active) { color: var(--text); }
+
+    /* Results */
+    .result-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.25rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .result-meta {
+      display: flex;
+      align-items: baseline;
+      gap: 0.75rem;
+      margin-bottom: 0.4rem;
+      flex-wrap: wrap;
+    }
+
+    .result-title {
+      font-size: 0.95rem;
+      font-weight: bold;
+      color: var(--accent);
+    }
+
+    .result-author {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    .result-score {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+
+    .result-page {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+
+    .result-passage {
+      font-size: 0.9rem;
+      line-height: 1.6;
+      color: var(--text);
+      margin-top: 0.5rem;
+      border-left: 3px solid var(--tag-border);
+      padding-left: 0.75rem;
+    }
+
+    /* Book list */
+    .book-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.9rem 1.25rem;
+      margin-bottom: 0.6rem;
+      display: flex;
+      align-items: baseline;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .book-title {
+      font-size: 0.95rem;
+      font-weight: bold;
+      color: var(--accent);
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .book-author {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    .tags {
+      display: flex;
+      gap: 0.35rem;
+      flex-wrap: wrap;
+      margin-top: 0.4rem;
+    }
+
+    .tag {
+      font-size: 0.75rem;
+      font-family: 'Courier New', monospace;
+      background: var(--tag-bg);
+      border: 1px solid var(--tag-border);
+      color: var(--accent);
+      border-radius: 3px;
+      padding: 0.1rem 0.45rem;
+    }
+
+    /* Status / empty states */
+    .status {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      padding: 2rem 0;
+      font-style: italic;
+    }
+
+    .error {
+      color: #a03020;
+      background: #fdf0ee;
+      border: 1px solid #e8c0b8;
+      border-radius: var(--radius);
+      padding: 0.75rem 1rem;
+      font-size: 0.9rem;
+      margin-bottom: 1rem;
+    }
+
+    /* Panel views */
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* Spinner */
+    .spinner {
+      display: inline-block;
+      width: 1em;
+      height: 1em;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 0.4rem;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    footer {
+      text-align: center;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      padding: 1rem;
+      border-top: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <span>📚</span>
+  <h1>Personal Library</h1>
+</header>
+
+<div class="container">
+
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('search')">Search</button>
+    <button class="tab" onclick="switchTab('books')">Books</button>
+    <button class="tab" onclick="switchTab('settings')">Settings</button>
+  </div>
+
+  <!-- SEARCH PANEL -->
+  <div id="panel-search" class="panel active">
+    <div class="search-bar">
+      <input id="query" type="text" placeholder="Ask a question or enter a topic…"
+             onkeydown="if(event.key==='Enter') doSearch()">
+      <button onclick="doSearch()">Search</button>
+    </div>
+
+    <div class="filters">
+      <label>Topic filter:
+        <select id="topic-filter">
+          <option value="">All books</option>
+        </select>
+      </label>
+      <label>Results:
+        <input id="n-results" type="number" value="8" min="1" max="20" style="width:60px">
+      </label>
+    </div>
+
+    <div id="search-status" class="status">Enter a query above to search your library.</div>
+    <div id="search-error" class="error" style="display:none"></div>
+    <div id="search-results"></div>
+  </div>
+
+  <!-- BOOKS PANEL -->
+  <div id="panel-books" class="panel">
+    <div id="books-status" class="status"><span class="spinner"></span> Loading books…</div>
+    <div id="books-error" class="error" style="display:none"></div>
+    <div id="books-list"></div>
+  </div>
+
+</div>
+
+  <!-- SETTINGS PANEL -->
+  <div id="panel-settings" class="panel">
+    <div id="settings-msg" style="display:none;margin-bottom:1rem"></div>
+    <div class="result-card" style="max-width:540px">
+      <h3 style="font-size:1rem;color:var(--accent);margin-bottom:1.2rem">Configuration</h3>
+
+      <div style="margin-bottom:1rem">
+        <label style="display:block;font-size:0.85rem;color:var(--text-muted);margin-bottom:0.3rem">
+          Books directory
+        </label>
+        <input id="s-books-dir" type="text" style="width:100%;padding:0.5rem 0.7rem;font-family:monospace;
+          font-size:0.88rem;border:1.5px solid var(--border);border-radius:var(--radius);
+          background:var(--surface);color:var(--text);outline:none">
+        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.2rem">
+          Drop PDFs here — requires restart to take effect
+        </div>
+      </div>
+
+      <div style="margin-bottom:1rem">
+        <label style="display:block;font-size:0.85rem;color:var(--text-muted);margin-bottom:0.3rem">
+          Anthropic API key
+          <span id="s-key-status" style="margin-left:0.5rem;font-size:0.78rem"></span>
+        </label>
+        <div style="display:flex;gap:0.4rem">
+          <input id="s-api-key" type="password" placeholder="sk-ant-…"
+            style="flex:1;padding:0.5rem 0.7rem;font-family:monospace;font-size:0.88rem;
+            border:1.5px solid var(--border);border-radius:var(--radius);
+            background:var(--surface);color:var(--text);outline:none">
+          <button onclick="toggleKeyVisibility()"
+            style="padding:0.5rem 0.8rem;border:1px solid var(--border);border-radius:var(--radius);
+            background:var(--tag-bg);color:var(--text);cursor:pointer;font-size:0.82rem">
+            Show
+          </button>
+        </div>
+        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.2rem">
+          Optional — enables LLM topic tagging. Leave blank to use Claude CLI or clustering only.
+        </div>
+      </div>
+
+      <div style="margin-bottom:1.5rem">
+        <label style="display:block;font-size:0.85rem;color:var(--text-muted);margin-bottom:0.3rem">
+          LLM model
+        </label>
+        <select id="s-model" style="padding:0.5rem 0.7rem;font-family:inherit;font-size:0.88rem;
+          border:1.5px solid var(--border);border-radius:var(--radius);
+          background:var(--surface);color:var(--text);outline:none">
+          <option value="claude-haiku-4-5-20251001">Claude Haiku (fast, cheap)</option>
+          <option value="claude-sonnet-4-6">Claude Sonnet (smarter)</option>
+        </select>
+      </div>
+
+      <button onclick="saveSettings()"
+        style="padding:0.6rem 1.4rem;background:var(--accent);color:#fff;border:none;
+        border-radius:var(--radius);font-size:0.95rem;font-family:inherit;cursor:pointer">
+        Save
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<footer>Served from localhost — fully offline</footer>
+
+<script>
+  const API = 'http://localhost:8765';
+  let allTopics = new Set();
+
+  // ── Tab switching ──────────────────────────────────────────────
+  function switchTab(name) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    event.target.classList.add('active');
+    document.getElementById('panel-' + name).classList.add('active');
+    if (name === 'books') loadBooks();
+    if (name === 'settings') loadSettings();
+  }
+
+  // ── Books ──────────────────────────────────────────────────────
+  async function loadBooks() {
+    const statusEl = document.getElementById('books-status');
+    const errorEl  = document.getElementById('books-error');
+    const listEl   = document.getElementById('books-list');
+    errorEl.style.display = 'none';
+    listEl.innerHTML = '';
+    statusEl.innerHTML = '<span class="spinner"></span> Loading books…';
+    statusEl.style.display = 'block';
+
+    try {
+      const res = await fetch(`${API}/books`);
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      const books = await res.json();
+
+      statusEl.style.display = 'none';
+      if (!books.length) {
+        statusEl.textContent = 'No books indexed yet.';
+        statusEl.style.display = 'block';
+        return;
+      }
+
+      books.forEach(b => {
+        (b.topics || []).forEach(t => allTopics.add(t));
+        const card = document.createElement('div');
+        card.className = 'book-card';
+        card.innerHTML = `
+          <div style="flex:1;min-width:200px">
+            <div class="book-title">${esc(b.title)}</div>
+            <div class="book-author">${esc(b.author)}</div>
+            ${b.topics && b.topics.length
+              ? `<div class="tags">${b.topics.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>`
+              : ''}
+          </div>
+          <div style="font-size:0.75rem;color:var(--text-muted)">${esc(b.file)}</div>
+        `;
+        listEl.appendChild(card);
+      });
+
+      updateTopicFilter();
+    } catch (e) {
+      statusEl.style.display = 'none';
+      errorEl.textContent = 'Could not load books: ' + e.message;
+      errorEl.style.display = 'block';
+    }
+  }
+
+  function updateTopicFilter() {
+    const sel = document.getElementById('topic-filter');
+    const current = sel.value;
+    sel.innerHTML = '<option value="">All books</option>';
+    [...allTopics].sort().forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t;
+      if (t === current) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  }
+
+  // ── Search ─────────────────────────────────────────────────────
+  async function doSearch() {
+    const query = document.getElementById('query').value.trim();
+    if (!query) return;
+
+    const statusEl  = document.getElementById('search-status');
+    const errorEl   = document.getElementById('search-error');
+    const resultsEl = document.getElementById('search-results');
+    const topic     = document.getElementById('topic-filter').value;
+    const n         = parseInt(document.getElementById('n-results').value) || 8;
+
+    errorEl.style.display = 'none';
+    resultsEl.innerHTML = '';
+    statusEl.innerHTML = '<span class="spinner"></span> Searching…';
+    statusEl.style.display = 'block';
+
+    try {
+      const res = await fetch(`${API}/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, topic, n }),
+      });
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      const hits = await res.json();
+
+      statusEl.style.display = 'none';
+      if (!hits.length) {
+        statusEl.textContent = 'No results found.';
+        statusEl.style.display = 'block';
+        return;
+      }
+
+      hits.forEach(h => {
+        const card = document.createElement('div');
+        card.className = 'result-card';
+        card.innerHTML = `
+          <div class="result-meta">
+            <span class="result-title">${esc(h.title)}</span>
+            <span class="result-author">${esc(h.author)}</span>
+            <span class="result-page">p.${h.page}</span>
+            <span class="result-score">${(h.score * 100).toFixed(0)}% match</span>
+          </div>
+          ${h.topics && h.topics.length
+            ? `<div class="tags" style="margin-bottom:0.4rem">${h.topics.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>`
+            : ''}
+          <div class="result-passage">${esc(h.passage)}</div>
+        `;
+        resultsEl.appendChild(card);
+      });
+
+      // Populate topic filter from results
+      hits.forEach(h => (h.topics || []).forEach(t => allTopics.add(t)));
+      updateTopicFilter();
+
+    } catch (e) {
+      statusEl.style.display = 'none';
+      errorEl.textContent = 'Search failed: ' + e.message;
+      errorEl.style.display = 'block';
+    }
+  }
+
+  // ── Settings ───────────────────────────────────────────────────
+  async function loadSettings() {
+    try {
+      const res = await fetch(`${API}/settings`);
+      const s = await res.json();
+      document.getElementById('s-books-dir').value = s.books_dir || '';
+      document.getElementById('s-model').value = s.llm_model || 'claude-haiku-4-5-20251001';
+      const keyStatus = document.getElementById('s-key-status');
+      keyStatus.textContent = s.llm_api_key_set ? '✓ set' : '(not set)';
+      keyStatus.style.color = s.llm_api_key_set ? '#4a7c4e' : 'var(--text-muted)';
+    } catch (e) {
+      showSettingsMsg('Could not load settings: ' + e.message, true);
+    }
+  }
+
+  async function saveSettings() {
+    const body = {
+      books_dir: document.getElementById('s-books-dir').value.trim(),
+      llm_api_key: document.getElementById('s-api-key').value.trim(),
+      llm_model: document.getElementById('s-model').value,
+    };
+    try {
+      const res = await fetch(`${API}/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      document.getElementById('s-api-key').value = '';
+      showSettingsMsg(
+        data.restart_required
+          ? 'Saved. Restart the server for path/port changes to take effect.'
+          : 'Saved.',
+        false
+      );
+      loadSettings();
+    } catch (e) {
+      showSettingsMsg('Save failed: ' + e.message, true);
+    }
+  }
+
+  function showSettingsMsg(msg, isError) {
+    const el = document.getElementById('settings-msg');
+    el.textContent = msg;
+    el.style.display = 'block';
+    el.style.cssText += isError
+      ? ';color:#a03020;background:#fdf0ee;border:1px solid #e8c0b8;padding:0.6rem 1rem;border-radius:4px'
+      : ';color:#2a5c2e;background:#eef7ef;border:1px solid #b0d4b4;padding:0.6rem 1rem;border-radius:4px';
+    setTimeout(() => { el.style.display = 'none'; }, 4000);
+  }
+
+  function toggleKeyVisibility() {
+    const inp = document.getElementById('s-api-key');
+    const btn = event.target;
+    if (inp.type === 'password') { inp.type = 'text'; btn.textContent = 'Hide'; }
+    else { inp.type = 'password'; btn.textContent = 'Show'; }
+  }
+
+  function esc(str) {
+    return String(str ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+</script>
+</body>
+</html>

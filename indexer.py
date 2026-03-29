@@ -173,24 +173,56 @@ def _extract_from_first_pages(doc) -> tuple[str, str]:
     return title, author
 
 
+def _extract_year(doc, raw_meta: dict) -> str:
+    """Try to extract 4-digit publication year from PDF metadata or first-page text."""
+    import re
+
+    # 1. PDF metadata dates: "D:20190101..." format
+    for key in ("creationDate", "modDate"):
+        m = re.search(r"D:(\d{4})", raw_meta.get(key, ""))
+        if m:
+            y = int(m.group(1))
+            if 1800 < y < 2100:
+                return str(y)
+
+    # 2. Text patterns on the first 8 pages
+    _PATS = [
+        r"first\s+published[^\n]{0,40}(\d{4})",
+        r"(?:published|copyright|©)[^\n]{0,30}(\d{4})",
+        r"(\d{4})[^\n]{0,30}(?:published|copyright|©)",
+        r"(\d{4})\s+edition",
+    ]
+    for page_num in range(min(8, len(doc))):
+        text = doc[page_num].get_text("text")
+        for pat in _PATS:
+            m = re.search(pat, text, re.IGNORECASE)
+            if m:
+                y = int(m.group(1))
+                if 1800 < y < 2100:
+                    return str(y)
+
+    return ""
+
+
 def guess_metadata(path: Path) -> dict[str, str]:
-    """Extract title/author from PDF metadata, then first-page analysis, fall back to filename."""
+    """Extract title/author/year from PDF metadata, then first-page analysis, fall back to filename."""
     doc = fitz.open(str(path))
-    meta = doc.metadata or {}
-    title = (meta.get("title") or "").strip()
-    author = (meta.get("author") or "").strip()
+    raw_meta = doc.metadata or {}
+    title = (raw_meta.get("title") or "").strip()
+    author = (raw_meta.get("author") or "").strip()
     if not title or not author:
         inferred_title, inferred_author = _extract_from_first_pages(doc)
         if not title:
             title = inferred_title
         if not author:
             author = inferred_author
+    year = _extract_year(doc, raw_meta)
     doc.close()
     if not title:
         title = path.stem.replace("_", " ").replace("-", " ").title()
     if not author:
         author = "Unknown"
-    return {"title": title, "author": author, "file": path.name}
+    return {"title": title, "author": author, "file": path.name, "year": year}
 
 
 def get_collection(index_dir: Path) -> chromadb.Collection:
@@ -252,6 +284,7 @@ def index_file(path: Path, collection: chromadb.Collection, embedder) -> dict:
                 "title": meta["title"],
                 "author": meta["author"],
                 "file": meta["file"],
+                "year": meta.get("year", ""),
                 "page": page_num,
                 "chunk_index": chunk_index,
             })
@@ -375,6 +408,7 @@ def list_indexed_books(index_dir: Path) -> list[dict]:
                 "title": meta["title"],
                 "author": meta["author"],
                 "file": file,
+                "year": meta.get("year", ""),
                 "topics": parse_topics(meta.get("topics", "")),
             }
     return list(seen.values())

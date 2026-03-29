@@ -244,6 +244,26 @@
       padding: 0.1rem 0.45rem;
     }
 
+    .tag-pill {
+      font-size: 0.8rem;
+      font-family: 'Courier New', monospace;
+      background: var(--tag-bg);
+      border: 1px solid var(--tag-border);
+      color: var(--accent);
+      border-radius: 3px;
+      padding: 0.2rem 0.6rem;
+      cursor: pointer;
+      transition: background 0.12s, color 0.12s;
+    }
+
+    .tag-pill:hover { background: var(--border); }
+
+    .tag-pill.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
     /* Status / empty states */
     .status {
       text-align: center;
@@ -332,6 +352,10 @@
 
   <!-- BOOKS PANEL -->
   <div id="panel-books" class="panel">
+    <div id="books-filter" style="display:none;margin-bottom:1.2rem">
+      <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:0.5rem">Filter by tag:</div>
+      <div id="books-tag-pills" style="display:flex;gap:0.4rem;flex-wrap:wrap"></div>
+    </div>
     <div id="books-status" class="status"><span class="spinner"></span> Loading books…</div>
     <div id="books-error" class="error" style="display:none"></div>
     <div id="books-list"></div>
@@ -417,50 +441,92 @@
   }
 
   // ── Books ──────────────────────────────────────────────────────
+  let _allBooks = [];
+  let _activeBookTag = '';
+
   async function loadBooks() {
     const statusEl = document.getElementById('books-status');
     const errorEl  = document.getElementById('books-error');
-    const listEl   = document.getElementById('books-list');
     errorEl.style.display = 'none';
-    listEl.innerHTML = '';
     statusEl.innerHTML = '<span class="spinner"></span> Loading books…';
     statusEl.style.display = 'block';
+    document.getElementById('books-list').innerHTML = '';
+    document.getElementById('books-filter').style.display = 'none';
 
     try {
       const res = await fetch(`${API}/books`);
       if (!res.ok) throw new Error(`Server error ${res.status}`);
-      const books = await res.json();
-
+      _allBooks = await res.json();
+      _activeBookTag = '';
       statusEl.style.display = 'none';
-      if (!books.length) {
+
+      if (!_allBooks.length) {
         statusEl.textContent = 'No books indexed yet.';
         statusEl.style.display = 'block';
         return;
       }
 
-      books.forEach(b => {
-        (b.topics || []).forEach(t => allTopics.add(t));
-        const card = document.createElement('div');
-        card.className = 'book-card';
-        card.innerHTML = `
-          <div style="flex:1;min-width:200px">
-            <div class="book-title">${esc(b.title)}</div>
-            <div class="book-author">${esc(b.author)}</div>
-            ${b.topics && b.topics.length
-              ? `<div class="tags">${b.topics.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>`
-              : ''}
-          </div>
-          <div style="font-size:0.75rem;color:var(--text-muted)">${esc(b.file)}</div>
-        `;
-        listEl.appendChild(card);
-      });
-
+      _allBooks.forEach(b => (b.topics || []).forEach(t => allTopics.add(t)));
       updateTopicFilter();
+      _renderBookTagPills();
+      _renderBooks();
     } catch (e) {
       statusEl.style.display = 'none';
       errorEl.textContent = 'Could not load books: ' + e.message;
       errorEl.style.display = 'block';
     }
+  }
+
+  function _renderBookTagPills() {
+    const container = document.getElementById('books-tag-pills');
+    const filterEl  = document.getElementById('books-filter');
+    const tags = [...new Set(_allBooks.flatMap(b => b.topics || []))].sort();
+    if (!tags.length) { filterEl.style.display = 'none'; return; }
+    filterEl.style.display = 'block';
+    container.innerHTML = '';
+    tags.forEach(t => {
+      const btn = document.createElement('button');
+      btn.className = 'tag-pill' + (t === _activeBookTag ? ' active' : '');
+      btn.textContent = t;
+      btn.dataset.tag = t;
+      btn.onclick = () => {
+        _activeBookTag = _activeBookTag === t ? '' : t;
+        container.querySelectorAll('.tag-pill').forEach(p =>
+          p.classList.toggle('active', p.dataset.tag === _activeBookTag)
+        );
+        _renderBooks();
+      };
+      container.appendChild(btn);
+    });
+  }
+
+  function _renderBooks() {
+    const listEl = document.getElementById('books-list');
+    listEl.innerHTML = '';
+    const books = _activeBookTag
+      ? _allBooks.filter(b => (b.topics || []).includes(_activeBookTag))
+      : _allBooks;
+
+    if (!books.length) {
+      listEl.innerHTML = '<div class="status">No books match this tag.</div>';
+      return;
+    }
+
+    books.forEach(b => {
+      const card = document.createElement('div');
+      card.className = 'book-card';
+      card.innerHTML = `
+        <div style="flex:1;min-width:200px">
+          <div class="book-title">${esc(b.title)}</div>
+          <div class="book-author">${esc(b.author)}${b.year ? ` <span style="color:var(--text-muted);font-style:normal">(${esc(b.year)})</span>` : ''}</div>
+          ${b.topics && b.topics.length
+            ? `<div class="tags">${b.topics.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>`
+            : ''}
+        </div>
+        <div style="font-size:0.75rem;color:var(--text-muted)">${esc(b.file)}</div>
+      `;
+      listEl.appendChild(card);
+    });
   }
 
   function updateTopicFilter() {

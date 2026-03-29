@@ -13,6 +13,10 @@ DEFAULTS: dict = {
     "port": 8765,
     "llm_api_key": "",
     "llm_model": "claude-haiku-4-5-20251001",
+    "chunk_size_tokens": 200,     # well under all-MiniLM-L6-v2's 256-token limit
+    "chunk_overlap_tokens": 20,
+    "batch_size": 64,
+    "topics_max_chars": 2500,
 }
 
 

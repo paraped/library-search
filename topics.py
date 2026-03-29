@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 
 
@@ -47,13 +48,25 @@ def detect_topics_llm(title: str, author: str, intro_text: str) -> list[str]:
 
     if api_key:
         import anthropic
+        from anthropic import RateLimitError
         client = anthropic.Anthropic(api_key=api_key)
-        resp = client.messages.create(
-            model=model,
-            max_tokens=64,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = resp.content[0].text.strip()
+        delay = 2.0
+        for attempt in range(2):
+            try:
+                resp = client.messages.create(
+                    model=model,
+                    max_tokens=64,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                text = resp.content[0].text.strip()
+                break
+            except RateLimitError:
+                if attempt == 0:
+                    time.sleep(delay)
+                else:
+                    raise RuntimeError("Anthropic rate limit: max retries exceeded")
+            except anthropic.APIStatusError as e:
+                raise RuntimeError(f"Anthropic API error ({e.status_code})") from e
     else:
         import shutil
         import subprocess
@@ -83,11 +96,13 @@ def detect_topics_clustering(
     book_files: list[str],
     collection,
     books_dir: Path,
+    max_chars: int = 2500,
 ) -> dict[str, list[str]]:
     """Cluster books by their mean chunk embeddings; label clusters via TF-IDF.
 
     Works entirely offline — no API calls.
     Returns {filename: [topic, ...]} for every book in book_files.
+    max_chars truncates intro text before TF-IDF (matches LLM path limit).
     """
     import numpy as np
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -95,11 +110,12 @@ def detect_topics_clustering(
     if not book_files:
         return {}
 
-    # Gather intro texts for TF-IDF
+    # Gather intro texts for TF-IDF, truncated to match LLM path
     intro_texts: dict[str, str] = {}
     for fname in book_files:
         path = books_dir / fname
-        intro_texts[fname] = get_book_intro_text(path) if path.exists() else fname
+        raw = get_book_intro_text(path) if path.exists() else fname
+        intro_texts[fname] = raw[:max_chars]
 
     # Single book — just pull top TF-IDF terms from the book itself
     if len(book_files) == 1:

@@ -4,14 +4,24 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 import chromadb
 import fitz  # PyMuPDF
 
 SUPPORTED_EXTENSIONS = {".pdf", ".epub"}
-CHUNK_SIZE = 500  # approximate tokens (words)
-CHUNK_OVERLAP = 50
+INDEX_VERSION = "v2_token"
+
+_tokenizer = None
+
+
+def _get_tokenizer():
+    global _tokenizer
+    if _tokenizer is None:
+        from transformers import AutoTokenizer
+        _tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
+    return _tokenizer
 
 
 def _book_id(path: Path) -> str:
@@ -30,15 +40,39 @@ def extract_pages(path: Path) -> list[tuple[int, str]]:
     return pages
 
 
-def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
-    words = text.split()
+def chunk_text(text: str, chunk_size: int = 200, overlap: int = 20) -> list[str]:
+    """Split text into overlapping token-based chunks.
+
+    Uses the embedding model's tokenizer to avoid silent truncation at the
+    model's 256-token context limit. Default chunk_size=200 leaves headroom
+    for special tokens added during encoding.
+    """
+    tokenizer = _get_tokenizer()
+    ids = tokenizer.encode(text, add_special_tokens=False)
+    if not ids:
+        return []
     chunks = []
     start = 0
-    while start < len(words):
+    while start < len(ids):
         end = start + chunk_size
-        chunks.append(" ".join(words[start:end]))
+        chunks.append(tokenizer.decode(ids[start:end], skip_special_tokens=True))
+        if end >= len(ids):
+            break
         start += chunk_size - overlap
     return chunks
+
+
+def parse_topics(raw: str) -> list[str]:
+    """Parse topics from stored metadata. Handles JSON array and legacy comma-string."""
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(t) for t in parsed if str(t).strip()]
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return [t.strip() for t in raw.split(",") if t.strip()]
 
 
 def _looks_like_name(text: str) -> bool:
@@ -167,11 +201,33 @@ def get_collection(index_dir: Path) -> chromadb.Collection:
     )
 
 
+def get_index_version(index_dir: Path) -> str:
+    """Read the index schema version. Returns 'v1_word' if not set (legacy index)."""
+    version_file = Path(index_dir) / ".schema_version"
+    if version_file.exists():
+        return version_file.read_text().strip()
+    return "v1_word"
+
+
+def set_index_version(index_dir: Path, version: str) -> None:
+    """Write the index schema version."""
+    Path(index_dir).mkdir(parents=True, exist_ok=True)
+    (Path(index_dir) / ".schema_version").write_text(version)
+
+
 def index_file(path: Path, collection: chromadb.Collection, embedder) -> dict:
     """Index a single file. Returns metadata dict."""
+    sys.path.insert(0, str(Path(__file__).parent))
+    import config as cfg
+
     path = Path(path)
     if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
         raise ValueError(f"Unsupported format: {path.suffix}")
+
+    conf = cfg.load()
+    chunk_size = conf.get("chunk_size_tokens", 200)
+    chunk_overlap = conf.get("chunk_overlap_tokens", 20)
+    batch_size = conf.get("batch_size", 64)
 
     meta = guess_metadata(path)
     book_id = _book_id(path)
@@ -188,7 +244,7 @@ def index_file(path: Path, collection: chromadb.Collection, embedder) -> dict:
 
     chunk_index = 0
     for page_num, page_text in pages:
-        for chunk in chunk_text(page_text):
+        for chunk in chunk_text(page_text, chunk_size=chunk_size, overlap=chunk_overlap):
             chunk_id = f"{book_id}_{chunk_index}"
             all_chunks.append(chunk)
             all_ids.append(chunk_id)
@@ -204,8 +260,6 @@ def index_file(path: Path, collection: chromadb.Collection, embedder) -> dict:
     if not all_chunks:
         raise ValueError(f"No text extracted from {path.name}")
 
-    # Embed in batches of 64
-    batch_size = 64
     for i in range(0, len(all_chunks), batch_size):
         batch_texts = all_chunks[i:i + batch_size]
         embeddings = embedder.encode(batch_texts, show_progress_bar=False).tolist()
@@ -233,6 +287,7 @@ def index_library(books_dir: Path, index_dir: Path, embedder) -> list[dict]:
                 results.append({"status": "ok", **meta})
             except Exception as e:
                 results.append({"status": "error", "file": path.name, "error": str(e)})
+    set_index_version(index_dir, INDEX_VERSION)
     return results
 
 
@@ -241,8 +296,8 @@ def update_book_topics(filename: str, topics: list[str], collection: chromadb.Co
     existing = collection.get(where={"file": filename}, include=["metadatas"])
     if not existing["ids"]:
         return 0
-    topics_str = ",".join(topics)
-    new_metas = [{**m, "topics": topics_str} for m in existing["metadatas"]]
+    topics_json = json.dumps(topics)
+    new_metas = [{**m, "topics": topics_json} for m in existing["metadatas"]]
     collection.update(ids=existing["ids"], metadatas=new_metas)
     return len(existing["ids"])
 
@@ -253,7 +308,12 @@ def tag_all_books(books_dir: Path, index_dir: Path) -> list[dict]:
     Returns a comparison list. Stores the best available result per book:
     LLM topics when reachable, clustering topics as fallback.
     """
+    sys.path.insert(0, str(Path(__file__).parent))
+    import config as cfg
     from topics import detect_topics_clustering, detect_topics_llm, get_book_intro_text
+
+    conf = cfg.load()
+    max_chars = conf.get("topics_max_chars", 2500)
 
     collection = get_collection(index_dir)
     books = list_indexed_books(index_dir)
@@ -263,9 +323,9 @@ def tag_all_books(books_dir: Path, index_dir: Path) -> list[dict]:
     book_files = [b["file"] for b in books]
     book_map = {b["file"]: b for b in books}
 
-    # Strategy 4: clustering (always runs, offline-safe)
+    # Strategy: clustering (always runs, offline-safe)
     try:
-        cluster_topics = detect_topics_clustering(book_files, collection, books_dir)
+        cluster_topics = detect_topics_clustering(book_files, collection, books_dir, max_chars=max_chars)
         cluster_error = None
     except Exception as e:
         cluster_topics = {f: [] for f in book_files}
@@ -276,7 +336,7 @@ def tag_all_books(books_dir: Path, index_dir: Path) -> list[dict]:
         book = book_map[fname]
         path = books_dir / fname
 
-        # Strategy 3: LLM (requires connectivity)
+        # Strategy: LLM (requires connectivity)
         llm_topics: list[str] = []
         llm_error: str | None = None
         if path.exists():
@@ -315,32 +375,48 @@ def list_indexed_books(index_dir: Path) -> list[dict]:
                 "title": meta["title"],
                 "author": meta["author"],
                 "file": file,
-                "topics": [t for t in meta.get("topics", "").split(",") if t],
+                "topics": parse_topics(meta.get("topics", "")),
             }
     return list(seen.values())
 
 
-def search(query: str, index_dir: Path, embedder, n: int = 5, topic: str | None = None) -> list[dict]:
-    """Semantic search. Returns top n chunks with metadata.
+def search(
+    query: str,
+    index_dir: Path,
+    embedder,
+    n: int = 5,
+    topic: str | None = None,
+) -> tuple[list[dict], dict]:
+    """Semantic search. Returns (hits, meta) where meta contains filter diagnostics.
 
     If topic is given, restricts search to books tagged with that topic.
+    If the topic filter matches nothing, falls back to unfiltered search and
+    sets meta['filter_ignored'] = True so callers can surface the fallback.
     """
     collection = get_collection(index_dir)
     total = collection.count()
     if total == 0:
-        return []
+        return [], {"filter_ignored": False, "filter_topic": topic}
 
     where = None
+    filter_ignored = False
+
     if topic:
         all_items = collection.get(include=["metadatas"])
         matching_files: set[str] = set()
         for meta in all_items["metadatas"]:
-            stored = meta.get("topics", "")
-            if any(topic.lower() in t.lower().strip() for t in stored.split(",") if t):
+            stored_topics = parse_topics(meta.get("topics", ""))
+            if any(topic.lower() in t.lower() for t in stored_topics):
                 matching_files.add(meta["file"])
         if matching_files:
             where = {"file": {"$in": list(matching_files)}}
-        # if nothing tagged, search everything (graceful degradation)
+        else:
+            filter_ignored = True
+            print(
+                f"[library-search] WARNING: topic filter '{topic}' matched no documents. "
+                "Falling back to unfiltered search.",
+                flush=True,
+            )
 
     query_embedding = embedder.encode([query], show_progress_bar=False).tolist()
     try:
@@ -351,7 +427,12 @@ def search(query: str, index_dir: Path, embedder, n: int = 5, topic: str | None 
             where=where,
         )
     except Exception:
-        # where filter may fail if no docs match; retry without filter
+        filter_ignored = True
+        print(
+            f"[library-search] WARNING: topic filter '{topic}' query failed. "
+            "Falling back to unfiltered search.",
+            flush=True,
+        )
         results = collection.query(
             query_embeddings=query_embedding,
             n_results=min(n, total),
@@ -369,8 +450,9 @@ def search(query: str, index_dir: Path, embedder, n: int = 5, topic: str | None 
             "author": meta["author"],
             "file": meta["file"],
             "page": meta["page"],
-            "topics": [t for t in meta.get("topics", "").split(",") if t],
+            "topics": parse_topics(meta.get("topics", "")),
             "score": round(1 - dist, 3),
             "passage": doc,
         })
-    return hits
+
+    return hits, {"filter_ignored": filter_ignored, "filter_topic": topic}

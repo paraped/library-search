@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import threading
 from pathlib import Path
 
@@ -72,6 +73,14 @@ def _index_untracked() -> None:
 
 def _watch_books() -> None:
     """Background daemon: index untracked files on startup, then watch for new drops."""
+    from indexer import get_index_version
+    if get_index_version(INDEX_DIR) != "v2_token":
+        print(
+            "[library-search] WARNING: Index used word-based chunking. "
+            "Run index_library() to rebuild with token-based chunks. "
+            "Search remains functional but chunk boundaries may be suboptimal.",
+            flush=True,
+        )
     _index_untracked()
     for changes in watch(str(BOOKS_DIR)):
         for change_type, path_str in changes:
@@ -109,10 +118,16 @@ def search_books(query: str, n: int = 5, topic: str = "") -> str:
         JSON list of matching passages with title, author, page, topics, and relevance score.
     """
     from indexer import search
-    hits = search(query, INDEX_DIR, _get_embedder(), n=n, topic=topic or None)
+    hits, meta = search(query, INDEX_DIR, _get_embedder(), n=n, topic=topic or None)
     if not hits:
         return "No results found. Make sure books are indexed with index_library first."
-    return json.dumps(hits, ensure_ascii=False, indent=2)
+    output = json.dumps(hits, ensure_ascii=False, indent=2)
+    if meta.get("filter_ignored"):
+        return (
+            f"Note: topic filter '{meta['filter_topic']}' matched no documents "
+            f"— showing unfiltered results.\n\n{output}"
+        )
+    return output
 
 
 @mcp.tool()

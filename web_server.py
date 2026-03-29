@@ -63,13 +63,14 @@ def list_books():
 @app.post("/search")
 def search(req: SearchRequest):
     from indexer import search as _search
-    return _search(
+    hits, _ = _search(
         req.query,
         cfg.index_dir(),
         get_embedder(),
         n=req.n,
         topic=req.topic or None,
     )
+    return hits
 
 
 @app.post("/tag")

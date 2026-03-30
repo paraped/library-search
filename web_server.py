@@ -13,7 +13,7 @@ from pydantic import BaseModel
 sys.path.insert(0, str(Path(__file__).parent))
 import config as cfg
 
-HTML_FILE = Path(__file__).parent / "library.html"
+HTML_FILE = Path(__file__).resolve().parent / "library.html"
 
 app = FastAPI(title="Library Search")
 app.add_middleware(
